@@ -14,6 +14,7 @@ In the `configs` directory, add your collector configuration yaml file, which sh
 
 ```yaml
 receivers:
+    # Add other receivers here.
     prometheus:
         config:
           scrape_configs:
@@ -66,11 +67,13 @@ service:
 
 Change the Dockerfile in your directory within `distributions` to point to your collector config [here](https://github.com/open-telemetry/opentelemetry-collector-releases/blob/main/distributions/otelcol-contrib/Dockerfile#L17).
 
-Finally, build the image: 
+Finally, build the artifacts, including binaries, container images, and more: 
 
 ```sh
-DISTRIBUTIONS=my-distribution make build
+DISTRIBUTIONS=my-distribution make generate goreleaser-verify
 ```
+
+For an example, see https://github.com/open-telemetry/opentelemetry-collector-releases/compare/main...dashpole:gmp_distro.
 
 ## Additional Options
 
