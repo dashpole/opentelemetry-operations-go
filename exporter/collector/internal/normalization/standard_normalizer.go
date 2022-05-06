@@ -60,19 +60,12 @@ func (s *standardNormalizer) NormalizeExponentialHistogramDataPoint(point pmetri
 			s.cache.SetExponentialHistogramDataPoint(identifier, &point)
 			return nil
 		}
-		// Make a copy so we don't mutate underlying data
-		newPoint := pmetric.NewExponentialHistogramDataPoint()
-		point.CopyTo(newPoint)
-		// Use the start timestamp from the normalization point
-		newPoint.SetStartTimestamp(start.Timestamp())
-		// Adjust the value based on the start point's value
-		newPoint.SetCount(point.Count() - start.Count())
-		// We drop points without a sum, so no need to check here.
-		newPoint.SetSum(point.Sum() - start.Sum())
-		newPoint.SetZeroCount(point.ZeroCount() - start.ZeroCount())
-		normalizeExponentialBuckets(newPoint.Positive(), start.Positive())
-		normalizeExponentialBuckets(newPoint.Negative(), start.Negative())
-		normalizedPoint = &newPoint
+		if point.Count() < start.Count() {
+			// The value reset, so store the current
+			s.cache.SetExponentialHistogramDataPoint(identifier, &point)
+			return nil
+		}
+		normalizedPoint = SubtractExponentialHistogramDataPoint(&point, start)
 	}
 	if (!ok && point.StartTimestamp() == 0) || !point.StartTimestamp().AsTime().Before(point.Timestamp().AsTime()) {
 		// This is the first time we've seen this metric, or we received
@@ -83,6 +76,23 @@ func (s *standardNormalizer) NormalizeExponentialHistogramDataPoint(point pmetri
 		return nil
 	}
 	return normalizedPoint
+}
+
+// SubtractExponentialHistogramDataPoint subtracts b from a.
+func SubtractExponentialHistogramDataPoint(a, b *pmetric.ExponentialHistogramDataPoint) *pmetric.ExponentialHistogramDataPoint {
+	// Make a copy so we don't mutate underlying data
+	newPoint := pmetric.NewExponentialHistogramDataPoint()
+	a.CopyTo(newPoint)
+	// Use the start timestamp from the normalization point
+	newPoint.SetStartTimestamp(b.Timestamp())
+	// Adjust the value based on the start point's value
+	newPoint.SetCount(a.Count() - b.Count())
+	// We drop points without a sum, so no need to check here.
+	newPoint.SetSum(a.Sum() - b.Sum())
+	newPoint.SetZeroCount(a.ZeroCount() - b.ZeroCount())
+	normalizeExponentialBuckets(newPoint.Positive(), b.Positive())
+	normalizeExponentialBuckets(newPoint.Negative(), b.Negative())
+	return &newPoint
 }
 
 func normalizeExponentialBuckets(pointBuckets, startBuckets pmetric.Buckets) {
@@ -116,29 +126,13 @@ func (s *standardNormalizer) NormalizeHistogramDataPoint(point pmetric.Histogram
 			)
 			return nil
 		}
-		// Make a copy so we don't mutate underlying data
-		newPoint := pmetric.NewHistogramDataPoint()
-		point.CopyTo(newPoint)
-		// Use the start timestamp from the normalization point
-		newPoint.SetStartTimestamp(start.Timestamp())
-		// Adjust the value based on the start point's value
-		newPoint.SetCount(point.Count() - start.Count())
-		// We drop points without a sum, so no need to check here.
-		newPoint.SetSum(point.Sum() - start.Sum())
-		pointBuckets := point.MBucketCounts()
-		startBuckets := start.MBucketCounts()
 		if !bucketBoundariesEqual(point.MExplicitBounds(), start.MExplicitBounds()) {
 			// The number of buckets changed, so we can't normalize points anymore.
 			// Treat this as a reset by recording and dropping this point.
 			s.cache.SetHistogramDataPoint(identifier, &point)
 			return nil
 		}
-		newBuckets := make([]uint64, len(pointBuckets))
-		for i := range pointBuckets {
-			newBuckets[i] = pointBuckets[i] - startBuckets[i]
-		}
-		newPoint.SetMBucketCounts(newBuckets)
-		normalizedPoint = &newPoint
+		normalizedPoint = SubtractHistogramDataPoint(&point, start)
 	}
 	if (!ok && point.StartTimestamp() == 0) || !point.StartTimestamp().AsTime().Before(point.Timestamp().AsTime()) {
 		// This is the first time we've seen this metric, or we received
@@ -149,6 +143,27 @@ func (s *standardNormalizer) NormalizeHistogramDataPoint(point pmetric.Histogram
 		return nil
 	}
 	return normalizedPoint
+}
+
+// SubtractHistogramDataPoint subtracts b from a.
+func SubtractHistogramDataPoint(a, b *pmetric.HistogramDataPoint) *pmetric.HistogramDataPoint {
+	// Make a copy so we don't mutate underlying data
+	newPoint := pmetric.NewHistogramDataPoint()
+	a.CopyTo(newPoint)
+	// Use the start timestamp from the normalization point
+	newPoint.SetStartTimestamp(b.Timestamp())
+	// Adjust the value based on the start point's value
+	newPoint.SetCount(a.Count() - b.Count())
+	// We drop points without a sum, so no need to check here.
+	newPoint.SetSum(a.Sum() - b.Sum())
+	pointBuckets := a.MBucketCounts()
+	startBuckets := b.MBucketCounts()
+	newBuckets := make([]uint64, len(pointBuckets))
+	for i := range pointBuckets {
+		newBuckets[i] = pointBuckets[i] - startBuckets[i]
+	}
+	newPoint.SetMBucketCounts(newBuckets)
+	return &newPoint
 }
 
 func bucketBoundariesEqual(a, b []float64) bool {
@@ -180,19 +195,7 @@ func (s *standardNormalizer) NormalizeNumberDataPoint(point pmetric.NumberDataPo
 			)
 			return nil
 		}
-		// Make a copy so we don't mutate underlying data
-		newPoint := pmetric.NewNumberDataPoint()
-		point.CopyTo(newPoint)
-		// Use the start timestamp from the normalization point
-		newPoint.SetStartTimestamp(start.Timestamp())
-		// Adjust the value based on the start point's value
-		switch newPoint.ValueType() {
-		case pmetric.NumberDataPointValueTypeInt:
-			newPoint.SetIntVal(point.IntVal() - start.IntVal())
-		case pmetric.NumberDataPointValueTypeDouble:
-			newPoint.SetDoubleVal(point.DoubleVal() - start.DoubleVal())
-		}
-		normalizedPoint = &newPoint
+		normalizedPoint = SubtractNumberDataPoint(&point, start)
 	}
 	if (!ok && point.StartTimestamp() == 0) || !point.StartTimestamp().AsTime().Before(point.Timestamp().AsTime()) {
 		// This is the first time we've seen this metric, or we received
@@ -203,6 +206,23 @@ func (s *standardNormalizer) NormalizeNumberDataPoint(point pmetric.NumberDataPo
 		return nil
 	}
 	return normalizedPoint
+}
+
+// SubtractNumberDataPoint subtracts b from a.
+func SubtractNumberDataPoint(a, b *pmetric.NumberDataPoint) *pmetric.NumberDataPoint {
+	// Make a copy so we don't mutate underlying data
+	newPoint := pmetric.NewNumberDataPoint()
+	a.CopyTo(newPoint)
+	// Use the start timestamp from the normalization point
+	newPoint.SetStartTimestamp(b.Timestamp())
+	// Adjust the value based on the start point's value
+	switch newPoint.ValueType() {
+	case pmetric.NumberDataPointValueTypeInt:
+		newPoint.SetIntVal(a.IntVal() - b.IntVal())
+	case pmetric.NumberDataPointValueTypeDouble:
+		newPoint.SetDoubleVal(a.DoubleVal() - b.DoubleVal())
+	}
+	return &newPoint
 }
 
 func (s *standardNormalizer) NormalizeSummaryDataPoint(point pmetric.SummaryDataPoint, identifier string) *pmetric.SummaryDataPoint {
@@ -220,19 +240,7 @@ func (s *standardNormalizer) NormalizeSummaryDataPoint(point pmetric.SummaryData
 			)
 			return nil
 		}
-		// Make a copy so we don't mutate underlying data.
-		newPoint := pmetric.NewSummaryDataPoint()
-		// Quantile values are copied, and are not modified. Quantiles are
-		// computed over the same time period as sum and count, but it isn't
-		// possible to normalize them.
-		point.CopyTo(newPoint)
-		// Use the start timestamp from the normalization point
-		newPoint.SetStartTimestamp(start.Timestamp())
-		// Adjust the value based on the start point's value
-		newPoint.SetCount(point.Count() - start.Count())
-		// We drop points without a sum, so no need to check here.
-		newPoint.SetSum(point.Sum() - start.Sum())
-		normalizedPoint = &newPoint
+		normalizedPoint = SubtractSummaryDataPoint(&point, start)
 	}
 	if (!ok && point.StartTimestamp() == 0) || !point.StartTimestamp().AsTime().Before(point.Timestamp().AsTime()) {
 		// This is the first time we've seen this metric, or we received
@@ -243,4 +251,21 @@ func (s *standardNormalizer) NormalizeSummaryDataPoint(point pmetric.SummaryData
 		return nil
 	}
 	return normalizedPoint
+}
+
+// SubtractSummaryDataPoint subtracts b from a.
+func SubtractSummaryDataPoint(a, b *pmetric.SummaryDataPoint) *pmetric.SummaryDataPoint {
+	// Make a copy so we don't mutate underlying data.
+	newPoint := pmetric.NewSummaryDataPoint()
+	// Quantile values are copied, and are not modified. Quantiles are
+	// computed over the same time period as sum and count, but it isn't
+	// possible to normalize them.
+	a.CopyTo(newPoint)
+	// Use the start timestamp from the normalization point
+	newPoint.SetStartTimestamp(b.Timestamp())
+	// Adjust the value based on the start point's value
+	newPoint.SetCount(a.Count() - b.Count())
+	// We drop points without a sum, so no need to check here.
+	newPoint.SetSum(a.Sum() - b.Sum())
+	return &newPoint
 }
