@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configauth"
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/otel/attribute"
@@ -316,6 +318,18 @@ var MetricsTestCases = []TestCase{
 			}
 		},
 		// SDK exporter does not support CreateServiceTimeSeries
+		SkipForSDK: true,
+	},
+	{
+		Name:                 "Sum with googleclientauth extension",
+		OTLPInputFixturePath: "testdata/fixtures/metrics/counter.json",
+		ExpectFixturePath:    "testdata/fixtures/metrics/counter_expect.json",
+		ConfigureCollector: func(cfg *collector.Config) {
+			cfg.MetricConfig.InstrumentationLibraryLabels = true
+			// Disable service resource labels here and below to keep output examples simpler.
+			cfg.MetricConfig.ServiceResourceLabels = false
+			cfg.MetricConfig.ClientConfig.Auth = &configauth.Authentication{AuthenticatorID: component.NewID("googleclientauth")}
+		},
 		SkipForSDK: true,
 	},
 	// Tests for the GMP exporter

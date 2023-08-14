@@ -42,6 +42,9 @@ func createTracesExporter(
 		collector.DefaultTimeout,
 	)
 	require.NoError(t, err)
+	host, err := hostWithGoogleAuth(cfg.ProjectID)
+	require.NoError(t, err)
+	require.NoError(t, exporter.Start(ctx, host))
 	t.Log("Collector traces exporter started")
 	return exporter
 }

@@ -15,6 +15,9 @@
 package testcases
 
 import (
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configauth"
+
 	"github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/collector"
 	"github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/collector/internal/logsutil"
 )
@@ -86,6 +89,14 @@ var LogsTestCases = []TestCase{
 		ConfigureLogsExporter: &logsutil.ExporterConfig{
 			MaxEntrySize:   50,
 			MaxRequestSize: 550,
+		},
+	},
+	{
+		Name:                 "Apache access log with client auth extension",
+		OTLPInputFixturePath: "testdata/fixtures/logs/logs_apache_access.json",
+		ExpectFixturePath:    "testdata/fixtures/logs/logs_apache_access_expected.json",
+		ConfigureCollector: func(cfg *collector.Config) {
+			cfg.LogConfig.ClientConfig.Auth = &configauth.Authentication{AuthenticatorID: component.NewID("googleclientauth")}
 		},
 	},
 }

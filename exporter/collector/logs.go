@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -41,6 +42,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 
@@ -143,21 +145,6 @@ func NewGoogleCloudLogsExporter(
 	cfg Config,
 	log *zap.Logger,
 ) (*LogsExporter, error) {
-	clientOpts, err := generateClientOptions(ctx, &cfg.LogConfig.ClientConfig, &cfg, loggingv2.DefaultAuthScopes())
-	if err != nil {
-		return nil, err
-	}
-
-	loggingClient, err := loggingv2.NewClient(ctx, clientOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.LogConfig.ClientConfig.Compression == gzip.Name {
-		loggingClient.CallOptions.WriteLogEntries = append(loggingClient.CallOptions.WriteLogEntries,
-			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
-	}
-
 	obs := selfObservability{
 		log: log,
 	}
@@ -171,9 +158,26 @@ func NewGoogleCloudLogsExporter(
 			maxEntrySize:   defaultMaxEntrySize,
 			maxRequestSize: defaultMaxRequestSize,
 		},
-
-		loggingClient: loggingClient,
 	}, nil
+}
+
+func (l *LogsExporter) Start(ctx context.Context, host component.Host) (err error) {
+	clientOpts, err := generateClientOptions(ctx, host, &l.cfg.LogConfig.ClientConfig, &l.cfg, loggingv2.DefaultAuthScopes())
+	if err != nil {
+		return err
+	}
+
+	loggingClient, err := loggingv2.NewClient(ctx, clientOpts...)
+	if err != nil {
+		return err
+	}
+
+	if l.cfg.LogConfig.ClientConfig.Compression == gzip.Name {
+		loggingClient.CallOptions.WriteLogEntries = append(loggingClient.CallOptions.WriteLogEntries,
+			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
+	}
+	l.loggingClient = loggingClient
+	return nil
 }
 
 // ConfigureExporter is used by integration tests to set exporter settings not visible to users.
@@ -190,16 +194,22 @@ func (l *LogsExporter) ConfigureExporter(config *logsutil.ExporterConfig) {
 }
 
 func (l *LogsExporter) Shutdown(ctx context.Context) error {
+	if l.loggingClient == nil {
+		return nil
+	}
 	return l.loggingClient.Close()
 }
 
 func (l *LogsExporter) PushLogs(ctx context.Context, ld plog.Logs) error {
+	if l.loggingClient == nil {
+		return errors.New("logs exporter not started")
+	}
 	projectEntries, err := l.mapper.createEntries(ld)
 	if err != nil {
 		return err
 	}
 
-	errors := []error{}
+	errs := []error{}
 	for project, entries := range projectEntries {
 		entry := 0
 		currentBatchSize := 0
@@ -230,7 +240,7 @@ func (l *LogsExporter) PushLogs(ctx context.Context, ld plog.Logs) error {
 			// write the list up to but not including the current entry's index
 			_, err := l.writeLogEntries(ctx, entries[:entry])
 			if err != nil {
-				errors = append(errors, err)
+				errs = append(errs, err)
 			}
 
 			entries = entries[entry:]
@@ -239,8 +249,8 @@ func (l *LogsExporter) PushLogs(ctx context.Context, ld plog.Logs) error {
 		}
 	}
 
-	if len(errors) > 0 {
-		return multierr.Combine(errors...)
+	if len(errs) > 0 {
+		return multierr.Combine(errs...)
 	}
 	return nil
 }
@@ -249,7 +259,7 @@ func (l logMapper) createEntries(ld plog.Logs) (map[string][]*logpb.LogEntry, er
 	// if destination_project_quota is enabled, projectMapKey will be the name of the project for each batch of entries
 	// otherwise, we can mix project entries for more efficient batching and store all entries in a single list
 	projectMapKey := ""
-	errors := []error{}
+	errs := []error{}
 	entries := make(map[string][]*logpb.LogEntry)
 	for i := 0; i < ld.ResourceLogs().Len(); i++ {
 		rl := ld.ResourceLogs().At(i)
@@ -279,7 +289,7 @@ func (l logMapper) createEntries(ld plog.Logs) (map[string][]*logpb.LogEntry, er
 				// metadata in case the payload needs to be split between multiple entries.
 				logName, err := l.getLogName(log)
 				if err != nil {
-					errors = append(errors, err)
+					errs = append(errs, err)
 					continue
 				}
 
@@ -292,7 +302,7 @@ func (l logMapper) createEntries(ld plog.Logs) (map[string][]*logpb.LogEntry, er
 					projectID,
 				)
 				if err != nil {
-					errors = append(errors, err)
+					errs = append(errs, err)
 					continue
 				}
 
@@ -309,7 +319,7 @@ func (l logMapper) createEntries(ld plog.Logs) (map[string][]*logpb.LogEntry, er
 		}
 	}
 
-	return entries, multierr.Combine(errors...)
+	return entries, multierr.Combine(errs...)
 }
 
 func mergeLogLabels(instrumentationSource, instrumentationVersion string, resourceLabels map[string]string) map[string]string {

@@ -38,7 +38,7 @@ func NewFactory() extension.Factory {
 	)
 }
 
-func createExtension(ctx context.Context, set extension.CreateSettings, cfg component.Config) (extension.Extension, error) {
+func createExtension(ctx context.Context, _ extension.CreateSettings, cfg component.Config) (extension.Extension, error) {
 	config := cfg.(*Config)
 	creds, err := google.FindDefaultCredentials(ctx, config.Scopes...)
 	if err != nil {

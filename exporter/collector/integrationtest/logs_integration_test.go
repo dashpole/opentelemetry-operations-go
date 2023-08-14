@@ -48,6 +48,9 @@ func createLogsExporter(
 	)
 	exporter.ConfigureExporter(test.ConfigureLogsExporter)
 	require.NoError(t, err)
+	host, err := hostWithGoogleAuth(cfg.ProjectID)
+	require.NoError(t, err)
+	require.NoError(t, exporter.Start(ctx, host))
 	t.Log("Collector logs exporter started")
 	return exporter
 }

@@ -143,6 +143,9 @@ func NewTraceTestExporter(
 		collector.DefaultTimeout,
 	)
 	require.NoError(t, err)
+	host, err := hostWithGoogleAuth(cfg.ProjectID)
+	require.NoError(t, err)
+	require.NoError(t, exporter.Start(ctx, host))
 	t.Logf("Collector TracesTestServer exporter started, pointing at %v", cfg.TraceConfig.ClientConfig.Endpoint)
 	return exporter
 }
@@ -166,6 +169,9 @@ func NewMetricTestExporter(
 		collector.DefaultTimeout,
 	)
 	require.NoError(t, err)
+	host, err := hostWithGoogleAuth(cfg.ProjectID)
+	require.NoError(t, err)
+	require.NoError(t, exporter.Start(ctx, host))
 	t.Logf("Collector MetricsTestServer exporter started, pointing at %v", cfg.MetricConfig.ClientConfig.Endpoint)
 	return exporter
 }
@@ -191,6 +197,9 @@ func NewLogTestExporter(
 	)
 	require.NoError(t, err)
 
+	host, err := hostWithGoogleAuth(cfg.ProjectID)
+	require.NoError(t, err)
+	require.NoError(t, exporter.Start(ctx, host))
 	exporter.ConfigureExporter(extraConfig)
 	t.Logf("Collector LogsTestServer exporter started, pointing at %v", cfg.LogConfig.ClientConfig.Endpoint)
 	return exporter

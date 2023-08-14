@@ -14,10 +14,26 @@
 
 package testcases
 
+import (
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configauth"
+
+	"github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/collector"
+)
+
 var TracesTestCases = []TestCase{
 	{
 		Name:                 "Basic traces",
 		OTLPInputFixturePath: "testdata/fixtures/traces/traces_basic.json",
 		ExpectFixturePath:    "testdata/fixtures/traces/traces_basic_expected.json",
+	},
+	{
+		Name:                 "Basic traces",
+		OTLPInputFixturePath: "testdata/fixtures/traces/traces_basic.json",
+		ExpectFixturePath:    "testdata/fixtures/traces/traces_basic_expected.json",
+		ConfigureCollector: func(cfg *collector.Config) {
+			cfg.TraceConfig.ClientConfig.Auth = &configauth.Authentication{AuthenticatorID: component.NewID("googleclientauth")}
+		},
+		SkipForSDK: true,
 	},
 }

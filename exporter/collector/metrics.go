@@ -50,6 +50,7 @@ import (
 
 	"go.opencensus.io/plugin/ocgrpc"
 	"go.opencensus.io/stats/view"
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 
@@ -152,6 +153,9 @@ func (me *MetricsExporter) Shutdown(ctx context.Context) error {
 		me.obs.log.Error("Error waiting for async tasks to finish.", zap.Error(ctx.Err()))
 	case <-c:
 	}
+	if me.client == nil {
+		return nil
+	}
 	return me.client.Close()
 }
 
@@ -169,25 +173,6 @@ func NewGoogleCloudMetricsExporter(
 	view.Register(ocgrpc.DefaultClientViews...)
 	setVersionInUserAgent(&cfg, version)
 
-	clientOpts, err := generateClientOptions(ctx, &cfg.MetricConfig.ClientConfig, &cfg, monitoring.DefaultAuthScopes())
-	if err != nil {
-		return nil, err
-	}
-
-	client, err := monitoring.NewMetricClient(ctx, clientOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.MetricConfig.ClientConfig.Compression == gzip.Name {
-		client.CallOptions.CreateMetricDescriptor = append(client.CallOptions.CreateMetricDescriptor,
-			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
-		client.CallOptions.CreateTimeSeries = append(client.CallOptions.CreateTimeSeries,
-			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
-		client.CallOptions.CreateServiceTimeSeries = append(client.CallOptions.CreateServiceTimeSeries,
-			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
-	}
-
 	obs := selfObservability{log: log}
 	shutdown := make(chan struct{})
 	normalizer := normalization.NewDisabledNormalizer()
@@ -195,9 +180,8 @@ func NewGoogleCloudMetricsExporter(
 		normalizer = normalization.NewStandardNormalizer(shutdown, log)
 	}
 	mExp := &MetricsExporter{
-		cfg:    cfg,
-		client: client,
-		obs:    obs,
+		cfg: cfg,
+		obs: obs,
 		mapper: metricMapper{
 			obs:        obs,
 			cfg:        cfg,
@@ -221,21 +205,44 @@ func NewGoogleCloudMetricsExporter(
 		})
 	}
 
-	if cfg.MetricConfig.WALConfig != nil {
-		_, _, err = mExp.setupWAL()
+	return mExp, nil
+}
+
+func (me *MetricsExporter) Start(ctx context.Context, host component.Host) (err error) {
+	clientOpts, err := generateClientOptions(ctx, host, &me.cfg.MetricConfig.ClientConfig, &me.cfg, monitoring.DefaultAuthScopes())
+	if err != nil {
+		return err
+	}
+
+	client, err := monitoring.NewMetricClient(ctx, clientOpts...)
+	if err != nil {
+		return err
+	}
+
+	if me.cfg.MetricConfig.ClientConfig.Compression == gzip.Name {
+		client.CallOptions.CreateMetricDescriptor = append(client.CallOptions.CreateMetricDescriptor,
+			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
+		client.CallOptions.CreateTimeSeries = append(client.CallOptions.CreateTimeSeries,
+			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
+		client.CallOptions.CreateServiceTimeSeries = append(client.CallOptions.CreateServiceTimeSeries,
+			gax.WithGRPCOptions(grpc.UseCompressor(gzip.Name)))
+	}
+	me.client = client
+
+	if me.cfg.MetricConfig.WALConfig != nil {
+		_, _, err := me.setupWAL()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		// start WAL popper routine
-		mExp.goroutines.Add(1)
-		go mExp.runWALReadAndExportLoop(ctx)
+		me.goroutines.Add(1)
+		go me.runWALReadAndExportLoop(ctx)
 	}
 
 	// Fire up the metric descriptor exporter.
-	mExp.goroutines.Add(1)
-	go mExp.exportMetricDescriptorRunner()
-
-	return mExp, nil
+	me.goroutines.Add(1)
+	go me.exportMetricDescriptorRunner()
+	return nil
 }
 
 // setupWAL creates the WAL.
@@ -673,6 +680,10 @@ func (me *MetricsExporter) exportMetricDescriptor(req *monitoringpb.CreateMetric
 	for _, opt := range me.requestOpts {
 		opt(&ctx, requestInfo{projectName: req.Name})
 	}
+	if me.client == nil {
+		me.obs.log.Error("Unable to send metric descriptor.", zap.Error(errors.New("metric exporter not started")), zap.Any("metric_descriptor", req.MetricDescriptor))
+		return
+	}
 	_, err := me.client.CreateMetricDescriptor(ctx, req)
 	if err != nil {
 		// TODO: Log-once on error, per metric descriptor?
@@ -691,6 +702,9 @@ func (me *MetricsExporter) createTimeSeries(ctx context.Context, req *monitoring
 	for _, opt := range me.requestOpts {
 		opt(&ctx, requestInfo{projectName: req.Name})
 	}
+	if me.client == nil {
+		return errors.New("metric exporter not started")
+	}
 	return me.client.CreateTimeSeries(ctx, req)
 }
 
@@ -700,6 +714,9 @@ func (me *MetricsExporter) createServiceTimeSeries(ctx context.Context, req *mon
 	defer cancel()
 	for _, opt := range me.requestOpts {
 		opt(&ctx, requestInfo{projectName: req.Name})
+	}
+	if me.client == nil {
+		return errors.New("metric exporter not started")
 	}
 	return me.client.CreateServiceTimeSeries(ctx, req)
 }

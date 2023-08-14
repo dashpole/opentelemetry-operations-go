@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"go.opencensus.io/plugin/ocgrpc"
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configauth"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"golang.org/x/oauth2/google"
@@ -61,6 +63,8 @@ type ClientConfig struct {
 	// GetClientOptions.
 	// Optional.
 	GetClientOptions func() []option.ClientOption
+	// Auth configuration for outgoing RPCs.
+	Auth *configauth.Authentication `mapstructure:"auth"`
 
 	Endpoint string `mapstructure:"endpoint"`
 	// Compression specifies the compression format for Metrics and Logging gRPC requests.
@@ -249,7 +253,7 @@ func setVersionInUserAgent(cfg *Config, version string) {
 	cfg.UserAgent = strings.ReplaceAll(cfg.UserAgent, "{{version}}", version)
 }
 
-func generateClientOptions(ctx context.Context, clientCfg *ClientConfig, cfg *Config, scopes []string) ([]option.ClientOption, error) {
+func generateClientOptions(ctx context.Context, host component.Host, clientCfg *ClientConfig, cfg *Config, scopes []string) ([]option.ClientOption, error) {
 	var copts []option.ClientOption
 	// option.WithUserAgent is used by the Trace exporter, but not the Metric exporter (see comment below)
 	if cfg.UserAgent != "" {
@@ -293,6 +297,20 @@ func generateClientOptions(ctx context.Context, clientCfg *ClientConfig, cfg *Co
 			return nil, err
 		}
 		copts = append(copts, option.WithTokenSource(tokenSource))
+	} else if clientCfg.Auth != nil {
+		if host.GetExtensions() == nil {
+			return nil, errors.New("no extensions configuration available")
+		}
+		grpcAuthenticator, cerr := clientCfg.Auth.GetClientAuthenticator(host.GetExtensions())
+		if cerr != nil {
+			return nil, cerr
+		}
+
+		perRPCCredentials, perr := grpcAuthenticator.PerRPCCredentials()
+		if perr != nil {
+			return nil, perr
+		}
+		copts = append(copts, option.WithGRPCDialOption(grpc.WithPerRPCCredentials(perRPCCredentials)))
 	} else if !clientCfg.UseInsecure && (clientCfg.GetClientOptions == nil || len(clientCfg.GetClientOptions()) == 0) {
 		// Only add default credentials if GetClientOptions does not
 		// provide additional options since GetClientOptions could pass
