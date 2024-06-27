@@ -30,11 +30,29 @@ import (
 	"google.golang.org/api/option"
 )
 
+// Function that is passed to "WithGcsAttributeExportOptions".
+type GcsAttributeExportOption func(*gcsAttributeExportOptions)
+
+// Controls the export of a specific attribute to Google Cloud Storage.
+type perAttributeGcsExportConfig struct {
+	// A "gs://" URI pattern indicating where to write the attribute.
+	uriPattern string
+}
+
+// Controls the export of certain attributes to Google Cloud Storage.
+type gcsAttributeExportOptions struct {
+	// For the subset of attributes that will be written to GCS,
+	// specifies the configuration for how/where they will be written.
+	attributeToGcsExportConfig map[attribute.Key]*perAttributeGcsExportConfig
+}
+
 // Option is function type that is passed to the exporter initialization function.
 type Option func(*options)
 
 // options contains options for configuring the exporter.
 type options struct {
+	// Whether/how to export some of the attributes to GCS.
+	gcsAttrExportOpts *gcsAttributeExportOptions
 	// OnError is the hook to be called when there is
 	// an error uploading the stats or tracing data.
 	// If no custom hook is set, errors are handled with the
@@ -124,6 +142,31 @@ func WithTimeout(t time.Duration) func(o *options) {
 	}
 }
 
+// WithGcsAttributeExportOptions configures additional options for exporting
+// a subset of the attributes to Google Cloud Storage.
+func WithGcsAttributeExportOptions(opts []GcsAttributeExportOption) func(o *options) {
+	return func(o *options) {
+		if o.gcsAttrExportOpts == nil {
+			o.gcsAttrExportOpts = &gcsAttributeExportOptions{
+				attributeToGcsExportConfig: make(map[attribute.Key]*perAttributeGcsExportConfig),
+			}
+		}
+		for _, opt := range opts {
+			opt(o.gcsAttrExportOpts)
+		}
+	}
+}
+
+// WithAttributeWrittenToGcs configures the given attribute key to be written to GCS at the
+// specified URI pattern.
+func WithAttributeWrittenToGcs(key attribute.Key, pattern string) func(o *gcsAttributeExportOptions) {
+	return func(o *gcsAttributeExportOptions) {
+		o.attributeToGcsExportConfig[key] = &perAttributeGcsExportConfig{
+			uriPattern: pattern,
+		}
+	}
+}
+
 // AttributeMapping determines how to map from OpenTelemetry span attribute keys to
 // cloud trace attribute keys.
 type AttributeMapping func(attribute.Key) attribute.Key
@@ -159,8 +202,9 @@ type Exporter struct {
 // New creates a new Exporter thats implements trace.Exporter.
 func New(opts ...Option) (*Exporter, error) {
 	o := options{
-		context:      context.Background(),
-		mapAttribute: defaultAttributeMapping,
+		gcsAttrExportOpts: nil,
+		context:           context.Background(),
+		mapAttribute:      defaultAttributeMapping,
 	}
 	for _, opt := range opts {
 		opt(&o)
