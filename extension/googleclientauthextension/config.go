@@ -78,6 +78,8 @@ type Config struct {
 var _ component.Config = (*Config)(nil)
 
 // Validate checks if the extension configuration is valid.
+//
+// Deprecated: Use github.com/open-telemetry/opentelemetry-collector-contrib/extension/googleclientauthextension instead.
 func (cfg *Config) Validate() error {
 	if _, ok := tokenTypes[cfg.TokenType]; !ok {
 		return errors.New("invalid token_type")
