@@ -49,5 +49,5 @@ Following are the configuration fields:
   - `id_token`: Google-signed [ID token](https://cloud.google.com/docs/authentication/token-types#id) will be generated.
 - **token_header** - The HTTP header used to carry the token. Default: `authorization`
   - `authorization`: Token is sent in the standard `Authorization` header.
-  - `proxy-authorization`: Token is sent in the `Proxy-Authorization` header (useful for [IAP-protected endpoints](https://cloud.google.com/iap/docs/authentication-howto#authenticating_from-proxy-authorization_header)).
+  - `proxy-authorization`: Token is sent in the `Proxy-Authorization` header (useful for [IAP-protected endpoints](https://cloud.google.com/iap/docs/authentication-howto#authenticating_from_proxy-authorization_header)).
 - **audience** - The audience claim used for generating ID token
