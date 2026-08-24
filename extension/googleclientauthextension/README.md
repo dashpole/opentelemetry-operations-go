@@ -7,7 +7,7 @@
 | ------------- |-----------|
 | Stability     | [deprecated]  |
 
-[deprecated]: https://github.com/open-telemetry/opentelemetry-collector#deprecated
+[deprecated]: https://github.com/open-telemetry/opentelemetry-collector/blob/main/docs/component-stability.md#deprecated
 
 This extension provides Google OAuth2 Client Credentials and Metadata for gRPC and http based exporters.
 
